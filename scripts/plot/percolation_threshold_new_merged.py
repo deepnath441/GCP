@@ -1,7 +1,5 @@
-# Finite size scaling to calculate \theta_T (Figure 8)
-
 import matplotlib
-matplotlib.use('Agg')   # no GUI
+matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,158 +7,129 @@ import math
 
 # -------- CONFIGURATION ----------
 neu = 1.3
-RMSD_limit = 0.001 # tolerance to calculate error term
+#neu = 1.7, 0.9
+RMSD_limit = 0.001
 
-# Define the lattices, their corresponding files, and plot colors
 lattices = [
-    {'name': 'Hexagonal',  'file': 'theta_05_hexa.txt',   'color': 'blue'},
     {'name': 'Square',     'file': 'theta_05_square.txt', 'color': 'red'},
-    {'name': 'Triangular', 'file': 'theta_05_tri.txt',    'color': 'green'}
+    {'name': 'Triangular', 'file': 'theta_05_tri.txt',    'color': 'green'},
+    {'name': 'Hexagonal',  'file': 'theta_05_hexa.txt',   'color': 'blue'},
 ]
 
-# -------- OPEN COMBINED LOG FILE ----------
 f_log = open('combined_print_output.txt', 'w')
 
-# -------- INITIALIZE FIGURES ----------
-fig_main, ax_main = plt.subplots(figsize=(10, 8))
-fig_rmsd, ax_rmsd = plt.subplots(figsize=(8, 6))
+# -------- OUTPUT FILE ----------
+out = open(f"fit_results_nu_{neu}.txt", "w")
+out.write("Lattice\tSlope\tIntercept\n")
 
-global_max_x = 0  
+# -------- CREATE 3 SUBPLOTS ----------
+#fig, axes = plt.subplots(3, 1, figsize=(6, 18))
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
-# -------- PROCESS EACH LATTICE ----------
-for lat in lattices:
+for idx, lat in enumerate(lattices):
+
+    ax = axes[idx]
+
     print(f"=== Processing {lat['name']} Lattice ===", file=f_log)
-    
-    # 1. READ DATA
+
     try:
         lines = open(lat['file']).readlines()
     except FileNotFoundError:
         print(f"Warning: {lat['file']} not found. Skipping.", file=f_log)
         continue
 
-    y = []
-    x = []
-    for line in lines[1:]: 
-        if not line.strip(): continue 
-        
+    y, x = [], []
+
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+
         parts = line.split()
         y.append(float(parts[1]))
-        
-        temp_1 = (-1.0) / (2.0 * float(neu))
-        temp = (float(parts[0]))**temp_1
-        x.append(float(temp))
-        
+        x.append((float(parts[0]))**((-1.0)/(2.0*neu)))
+
     x = np.array(x)
     y = np.array(y)
-    
-    global_max_x = max(global_max_x, np.max(x))
 
-    # 2. INITIAL FIT
-    fit = np.polyfit(x, y, 1)
-    gradient = fit[0]
-    intercept = fit[1]
+    # -------- FIT (CLEAN VERSION) ----------
+    best_a, best_b = np.polyfit(x, y, 1)
 
-    # 3. SLOPE SCAN
-    a_center = round(gradient, 3)
-    a_min = a_center - 0.1
-    a_max = a_center + 0.1
-    step = 0.001
+    # -------- WRITE OUTPUT ----------
+    out.write(f"{lat['name']}\t{best_a:.6f}\t{best_b:.6f}\n")
 
-    results = []
-    best_rmsd = 1e9
-    best_a, best_b = 0, 0
-    Npts = len(x)
-
-    a = a_min
-    while a <= a_max + 1e-9:
-        b = np.sum(y - a*x) / Npts
-        err = np.sum((y - (a*x + b))**2)
-        rmsd = math.sqrt(err / Npts)
-        results.append((a, b, rmsd))
-
-        if rmsd < best_rmsd:
-            best_rmsd = rmsd
-            best_a, best_b = a, b
-        a += step
-
-    # 4. ERROR CALCULATION
-    slopes = np.array([r[0] for r in results])
-    intercepts = np.array([r[1] for r in results])
-    rmsds = np.array([r[2] for r in results])
-
-    rmin = np.min(rmsds)
-    mask = rmsds <= (rmin + RMSD_limit)
-
-    acceptable_intercepts = intercepts[mask]
-    theta_error = (np.max(acceptable_intercepts) - np.min(acceptable_intercepts)) / 2.0
-    error_int = int(round(theta_error * 1000))
-
-    # 5. PLOTTING - MAIN FIGURE
+    # -------- SORT ----------
     sort_idx = np.argsort(x)
     x_sorted = x[sort_idx]
     y_sorted = y[sort_idx]
+
     fit_eq_sorted = best_a * x_sorted + best_b
 
     c = lat['color']
-    #legend_str = rf"{lat['name']} ($\theta_T = {best_b:.3f}({error_int})$)"
-    legend_str = rf"{lat['name']}"
 
-    # Extrapolation (dotted) and intercept (triangle)
+    # -------- EXTRAPOLATION ----------
     x_extrap = np.array([0, x_sorted[0]])
     y_extrap = np.array([best_b, fit_eq_sorted[0]])
-    # Extrapolation (dotted) and intercept (triangle)
-    ax_main.plot(x_extrap, y_extrap, color=c, linestyle=':', linewidth=2.5)
-    # Added clip_on=False to keep the full triangle visible at x=0
-    ax_main.plot(0, best_b, marker='^', color=c, markersize=12, zorder=5, clip_on=False)
 
-    # Data points and fit lines
-    ax_main.plot(x_sorted, y_sorted, 'o', color=c, markersize=12)
-    ax_main.plot(x_sorted, fit_eq_sorted, color=c, linewidth=2.5, label=legend_str)
+    ax.plot(x_extrap, y_extrap, color=c, linestyle=':', linewidth=2.5)
+    ax.plot(0, best_b, marker='^', color=c, markersize=18,
+            zorder=5, clip_on=False)
 
-    # 6. PLOTTING - RMSD FIGURE
-    ax_rmsd.plot(slopes, rmsds, label=lat['name'], color=c)
+    # -------- DATA + FIT ----------
+    ax.plot(x_sorted, y_sorted, 'o', color=c, markersize=15)
+    ax.plot(x_sorted, fit_eq_sorted, color=c, linewidth=2.5,
+            label=lat['name'])
 
-# -------- FINALIZE MAIN PLOT ----------
-# START X AXIS EXACTLY FROM 0.0
-ax_main.set_xlim(left=0.0, right=global_max_x * 1.05)
+    # -------- AXIS ----------
+    ax.set_xlim(left=0.0, right=max(x_sorted)*1.05)
 
-ax_main.set_xlabel(r"$N^{-1/(2\nu)}$", fontsize=35, labelpad=15)
-ax_main.set_ylabel(r"$\theta_{th}$", fontsize=35)
-ax_main.tick_params(axis='both', which='major', labelsize=25)
-ax_main.grid(True, linestyle='--', alpha=0.6)
+    ax.set_xlabel(r"$N^{-1/(2\nu)}$", fontsize=32, labelpad=10)
+    if idx == 0:
+        ax.set_ylabel(r"$\theta_{th}$", fontsize=32)
 
-# ==========================================
-# FULLY CUSTOMIZABLE LEGEND
-# ==========================================
-ax_main.legend(
-    loc='center right',             
-    bbox_to_anchor=(0.9, 0.7),  
-    fontsize=20,                  
-    ncol=1,                       
-    frameon=True,                 
-    fancybox=False,               
-    edgecolor='black',            
-    facecolor='white',            
-    framealpha=0.9,               
-    shadow=False,                 
-    borderpad=0.8,                
-    labelspacing=0.6,             
-    handlelength=2.5,             
-    handletextpad=0.8,            
-    markerscale=1.2               
-)
+    ax.tick_params(axis='both', labelsize=22)
+    ax.tick_params(axis='x', pad=10)
+    ax.grid(True, linestyle='--', alpha=0.6)
 
-fig_main.tight_layout()
-fig_main.savefig("theta_fit_combined.png", dpi=300, bbox_inches='tight')
+    # -------- LEGEND (ONE PER PANEL) ----------
+    ax.legend(loc='lower right', fontsize=30, frameon=True)
+    
+    panel_labels = ['(a)', '(b)', '(c)']
 
-# -------- FINALIZE RMSD PLOT ----------
-ax_rmsd.set_xlabel("Slope", fontsize=18)
-ax_rmsd.set_ylabel("RMSD", fontsize=18)
-ax_rmsd.tick_params(axis='both', which='major', labelsize=14)
-ax_rmsd.grid(True, linestyle='--', alpha=0.6)
-ax_rmsd.legend(fontsize=14, loc='upper center')
+    ax.text(0.15, 0.7, panel_labels[idx],
+        transform=ax.transAxes,
+        fontsize=30,
+        fontweight='bold')
 
-fig_rmsd.tight_layout()
-fig_rmsd.savefig("rmsd_vs_slope_combined.png", dpi=300, bbox_inches='tight')
+ytick_ranges = [
+    (0.34, 0.37, 0.01),   # for (a) Square
+    (0.30, 0.33, 0.01),   # for (b) Triangular
+    (0.40, 0.43, 0.01)    # for (c) Hexagonal
+]
+
+#xtick_ranges = [
+#    (0.0, 0.2, 0.1),   # for (a) Square
+#    (0.0, 0.2, 0.1),   # for (b) Triangular
+#    (0.0, 0.2, 0.1)    # for (c) Hexagonal
+#]
+
+# -------- SAVE ----------
+for idx, ax in enumerate(axes):
+    start, end, step = ytick_ranges[idx]
+    ax.set_yticks(np.arange(start, end + step, step))
+    
+#for idx, ax in enumerate(axes):
+#    start, end, step = xtick_ranges[idx]
+#    ax.set_xticks(np.arange(start, end + step, step))
+
+#for ax in axes:
+#    xmin, xmax = ax.get_xlim()
+#    ax.set_xticks(np.linspace(xmin, xmax, 4))
+
+for ax in axes:
+    ax.set_xticks([0.0, 0.1, 0.2])
+
+fig.tight_layout()
+fig.savefig(f"theta_fit_three_panel_nu_{neu}.png", dpi=300, bbox_inches='tight')
 
 f_log.close()
+out.close()
